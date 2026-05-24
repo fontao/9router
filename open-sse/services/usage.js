@@ -1747,6 +1747,59 @@ async function getCommandCodeUsage(apiKey, proxyOptions = null) {
     return { message: "CommandCode API key not available." };
   }
 
+  // Detect if the key looks like a web session cookie
+  if (finalKey.includes("__Secure-commandcode") || finalKey.includes("session_token=")) {
+    try {
+      const response = await proxyAwareFetch(
+        "https://api.commandcode.ai/internal/billing/credits?",
+        {
+          method: "GET",
+          headers: {
+            "Accept": "application/json",
+            "Cookie": finalKey,
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"
+          }
+        },
+        proxyOptions
+      );
+
+      if (response.status === 401 || response.status === 403) {
+        return { message: "CommandCode web session invalid or expired. Re-paste your cookie." };
+      }
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data && data.credits) {
+          const credits = data.credits;
+          // Sum up the available credits
+          const totalCredits = 
+            (credits.monthlyCredits || 0) + 
+            (credits.purchasedCredits || 0) + 
+            (credits.premiumMonthlyCredits || 0) + 
+            (credits.opensourceMonthlyCredits || 0);
+
+          return {
+            plan: "CommandCode Web",
+            quotas: {
+              credits: {
+                used: 0,
+                total: totalCredits,
+                remaining: totalCredits,
+                remainingPercentage: 100, // Not tracking used vs total on web, just remaining
+                resetAt: null,
+                unlimited: false,
+                displayName: "Available Credits (USD)"
+              }
+            }
+          };
+        }
+      }
+      return { message: `CommandCode web quota fetch failed (HTTP ${response.status}).` };
+    } catch (error) {
+      return { message: `CommandCode Web error: ${error.message}` };
+    }
+  }
+
   const candidateUrls = [
     "https://api.commandcode.ai/alpha/billing",
     "https://api.commandcode.ai/alpha/user",
